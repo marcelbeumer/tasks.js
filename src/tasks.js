@@ -60,6 +60,12 @@ function TasksManager(relScope, owner) {
 
 
 //
+TasksManager.prototype.context = function(relScope) {
+  return new TasksManager(relScope, this);
+};
+
+
+//
 TasksManager.prototype.create = function(scopedType) {
   var d, type;
 
