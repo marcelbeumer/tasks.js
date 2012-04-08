@@ -2,23 +2,69 @@
 /*global console:true, $:true */
 (function(global) {
 
-var _ = global.boba;
 
-
-// TasksManager constructor
-function TasksManager(owner, scope) {
-  _.bindAll(this);
-  this.deferreds = [];
-  this.schedulers = [];
-
-  this.owner = owner;
-  this.scope = scope || "";
+//
+function joinTypes(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return a + "." + b;
 }
 
 
 //
-TasksManager.prototype.create = function(type) {
-  var d;
+function isNegAllowed(r) {
+  return r === false || typeof(r) === "string";
+}
+
+
+//
+function isPromiseAllowed(r) {
+  return r && typeof(r.then) === "function";
+}
+
+
+//
+function selfOrOwners(obj, self) {
+  var o = self;
+  while (o) {
+    if (obj === o) return true;
+    o = o.owner;
+  }
+}
+
+
+// TasksManager constructor
+function TasksManager(relScope, owner) {
+  if (relScope && !this.isValidType(relScope)) {
+    throw new Error("invalid scope");
+  }
+
+  // All instances work on the same list of tasks.
+  // We assume there will always be a short list
+  // of tasks running at the same time.
+  // It's either this, or keeping track of a context
+  // tree and walking to find tasks.
+  if (owner) {
+    this.owner = owner;
+    this.tasks = owner.tasks;
+    this.fullScope = joinTypes(owner.fullScope, relScope);
+    this.relScope = relScope;
+  } else {
+    this.tasks = [];
+    this.scope = relScope || "";
+  }
+
+  // But have their own schedulers
+  this.schedulers = [];
+}
+
+
+//
+TasksManager.prototype.create = function(scopedType) {
+  var d, type;
+
+  // Prefix scope
+  type = joinTypes(this.fullScope, scopedType);
 
   if (!this.isValidType(type)) {
     throw new Error("invalid type");
@@ -26,14 +72,16 @@ TasksManager.prototype.create = function(type) {
 
   // Create deferred
   d = new $.Deferred();
-  d.type = type;
+  d.creator = this;
+  d.fullType = type;
+  d.scopedType = scopedType;
   d.status = "running";
 
   // Push it
-  this.deferreds.push(d);
+  this.tasks.push(d);
 
   // Always clean up
-  d.always(_.bind(function() {
+  d.always($.proxy(function() {
     this.forget(d);
   }, this));
 
@@ -44,12 +92,12 @@ TasksManager.prototype.create = function(type) {
 // Public forget - removes task out of task list,
 // effectively forgetting it
 TasksManager.prototype.forget = function(task) {
-  var deferreds = this.deferreds,
-      l = this.deferreds.length;
+  var tasks = this.tasks,
+      l = this.tasks.length;
 
   while (l--) {
-    if (deferreds[l] === task) {
-      deferreds.splice(l, 1);
+    if (tasks[l] === task) {
+      tasks.splice(l, 1);
       break;
     }
   }
@@ -60,21 +108,32 @@ TasksManager.prototype.forget = function(task) {
 // the task list.
 TasksManager.prototype.remember = function(task) {
   this.forget(task);
-  this.deferreds.push(task);
+  this.tasks.push(task);
 };
 
 
 // Public find
 // Returns all tasks matching type selector
-TasksManager.prototype.find = function(typeSel) {
-  var re = this.typeSelToRegExp(typeSel),
-      l = this.deferreds.length,
-      r = [],
-      t;
+TasksManager.prototype.find = function(scopedTypeSel) {
+  var p, l, r, t, all, typeSel;
 
+  typeSel = joinTypes(this.fullScope, typeSel);
+  p = this.parseTypeSel(typeSel)[0];
+  all = p[1] === "all";
+  l = this.tasks.length;
+  r = [];
+
+  // Find tasks that match the type, status
+  // and are either of our own or of one of
+  // our owners (and not another context within
+  // the same scope)
   while (l--) {
-    t = this.deferreds[l];
-    if (re.test(t.type)) r.push(t);
+    t = this.tasks[l];
+    if (p[0].test(t.fullType) &&
+        (all || t.status === p[1]) &&
+        selfOrOwners(t.creator, this)) {
+      r.push(t);
+    }
   }
 
   return r.reverse();
@@ -82,27 +141,29 @@ TasksManager.prototype.find = function(typeSel) {
 
 
 // Public cancel
-// Rejects all current deferreds that match type selector
-TasksManager.prototype.cancel = function(typeSel) {
-  var deferreds = this.find(typeSel),
-      l, x;
+// Rejects all current tasks that match type selector
+TasksManager.prototype.cancel = function(scopedTypeSel) {
+  var tasks, l, x, typeSel;
 
-  for (x = 0; x < (l = deferreds.length); x++) {
-    deferreds[x].reject('canceled');
+  tasks = this.find(scopedTypeSel);
+  for (x = 0; x < (l = tasks.length); x++) {
+    tasks[x].reject('canceled');
   }
 };
 
 
 // $.when wrapper
-TasksManager.prototype.when = function(/* typeSel, array or arguments */) {
-  var args = _.toArray(arguments),
+TasksManager.prototype.when =
+    function(/* scopedTypeSel, array or arguments */) {
+
+  var args = arguments,
       l = args.length,
       wargs;
 
   if (l > 1) {
     // arguments with promises
     wargs = args;
-  } else if (_.isArray(args[0])) {
+  } else if ($.isArray(args[0])) {
     // array of promises
     wargs = args[0];
   } else if (typeof(args[0]) === 'string') {
@@ -129,32 +190,41 @@ TasksManager.prototype.addScheduler = function(fn) {
 // Method that determines if tasks of passed type is allowed.
 // Returns true or promise to accept, false or string for reason
 // to reject.
-TasksManager.prototype.allowed = function(type) {
+TasksManager.prototype.allowed = function(scopedType) {
   var s, x, l, r, promises = [];
+
   l = this.schedulers.length;
 
   for (x = 0; x < l; x++) {
 
     // Run scheduler
-    r = this.schedulers[x].apply(this, [type]);
+    s = this.schedulers[x];
+    r = s.apply(this, scopedType);
 
-    // In case of negative result, return right away
-    if (r === false || typeof(r) === "string") return r;
-
+    // In case of negative result, return right away,
+    if (isNegAllowed(r)) return r;
     // Collect promises
-    if (r && typeof(r.then) === "function") promises.push(r);
+    if (isPromiseAllowed(r)) promises.push(r);
   }
 
-  // Return new promise or true
+  // Does the owner allow?
+  if (this.owner) {
+    r = this.owner.allowed(joinTypes(this.relScope, scopedType));
+    if (isNegAllowed(r)) return r;
+    if (isPromiseAllowed(r)) promises.push(r);
+  }
+
   if (promises.length > 0) {
+    // Return single promise using when
     return $.when.apply($, promises);
   } else {
+    // Or simply so all is fine
     return true;
   }
 };
 
 
-TasksManager.prototype.schedule = function(typeOrTask) {
+TasksManager.prototype.schedule = function(scopedTypeOrTask) {
   var scheduling,
       allowed,
       task;
@@ -164,30 +234,37 @@ TasksManager.prototype.schedule = function(typeOrTask) {
 
   // Get or create task
   if (typeof(typeOrTask) === "string") {
-    task = this.create(typeOrTask);
+    task = this.create(scopedTypeOrTask);
   } else {
-    task = typeOrTask;
+    task = scopedTypeOrTask;
   }
 
   // Set task as being scheduled
   task.status = "scheduling";
 
   // See if we are allowed to
-  allowed = this.allowed(task.type);
+  allowed = this.allowed(task.scopedType);
 
   if (allowed === true) {
+
     // If result is true, we can resolve now
     task.status = "running";
     scheduling.resolve(task);
-  } else if (allowed === false || typeof(allowed) === "string") {
+
+  } else if (isNegAllowed(allowed)) {
+
     // If false or string (reason), reject now
+    task.reject(allowed);
     scheduling.reject(allowed);
+
   } else {
+
     // We must have a promise, so we wait for it
     allowed.done(function() {
       task.status = "running";
       scheduling.resolve(task);
     }).fail(function(reason) {
+      task.reject(reason);
       scheduling.reject(reason);
     });
   }
