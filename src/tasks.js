@@ -33,8 +33,8 @@ function selfOrOwners(obj, self) {
 }
 
 
-// TasksManager constructor
-function TasksManager(relScope, owner) {
+// TasksContext constructor
+function TasksContext(relScope, owner) {
   if (relScope && !this.isValidType(relScope)) {
     throw new Error("invalid scope");
   }
@@ -60,13 +60,13 @@ function TasksManager(relScope, owner) {
 
 
 //
-TasksManager.prototype.context = function(relScope) {
-  return new TasksManager(relScope, this);
+TasksContext.prototype.context = function(relScope) {
+  return new TasksContext(relScope, this);
 };
 
 
 //
-TasksManager.prototype.create = function(scopedType) {
+TasksContext.prototype.create = function(scopedType) {
   var d, type;
 
   // Prefix scope
@@ -97,7 +97,7 @@ TasksManager.prototype.create = function(scopedType) {
 
 // Public forget - removes task out of task list,
 // effectively forgetting it
-TasksManager.prototype.forget = function(task) {
+TasksContext.prototype.forget = function(task) {
   var tasks = this.tasks,
       l = this.tasks.length;
 
@@ -112,7 +112,7 @@ TasksManager.prototype.forget = function(task) {
 
 // Public remember - remember a task by putting in
 // the task list.
-TasksManager.prototype.remember = function(task) {
+TasksContext.prototype.remember = function(task) {
   this.forget(task);
   this.tasks.push(task);
 };
@@ -120,7 +120,7 @@ TasksManager.prototype.remember = function(task) {
 
 // Public find
 // Returns all tasks matching type selector
-TasksManager.prototype.find = function(scopedTypeSel) {
+TasksContext.prototype.find = function(scopedTypeSel) {
   var p, l, r, t, all, typeSel;
 
   typeSel = joinTypes(this.fullScope, typeSel);
@@ -148,7 +148,7 @@ TasksManager.prototype.find = function(scopedTypeSel) {
 
 // Public cancel
 // Rejects all current tasks that match type selector
-TasksManager.prototype.cancel = function(scopedTypeSel) {
+TasksContext.prototype.cancel = function(scopedTypeSel) {
   var tasks, l, x, typeSel;
 
   tasks = this.find(scopedTypeSel);
@@ -159,7 +159,7 @@ TasksManager.prototype.cancel = function(scopedTypeSel) {
 
 
 // $.when wrapper
-TasksManager.prototype.when =
+TasksContext.prototype.when =
     function(/* scopedTypeSel, array or arguments */) {
 
   var args = arguments,
@@ -184,7 +184,7 @@ TasksManager.prototype.when =
 // Adds scheduler function.
 // Each scheduler should returns true, undefined or promise to accept,
 // false or string for reason to reject
-TasksManager.prototype.addScheduler = function(fn) {
+TasksContext.prototype.addScheduler = function(fn) {
   if (typeof(fn) !== "function") {
     throw new Error("scheduler must be a function");
   }
@@ -196,7 +196,7 @@ TasksManager.prototype.addScheduler = function(fn) {
 // Method that determines if tasks of passed type is allowed.
 // Returns true or promise to accept, false or string for reason
 // to reject.
-TasksManager.prototype.allowed = function(scopedType) {
+TasksContext.prototype.allowed = function(scopedType) {
   var s, x, l, r, promises = [];
 
   l = this.schedulers.length;
@@ -230,7 +230,7 @@ TasksManager.prototype.allowed = function(scopedType) {
 };
 
 
-TasksManager.prototype.schedule = function(scopedTypeOrTask) {
+TasksContext.prototype.schedule = function(scopedTypeOrTask) {
   var scheduling,
       allowed,
       task;
@@ -281,7 +281,7 @@ TasksManager.prototype.schedule = function(scopedTypeOrTask) {
 
 
 //
-TasksManager.prototype.parseTypeSel = function(typeSel) {
+TasksContext.prototype.parseTypeSel = function(typeSel) {
   var result = [], // 0: regex, 1: status
       parts,
       status,
@@ -307,17 +307,17 @@ TasksManager.prototype.parseTypeSel = function(typeSel) {
 
 
 //
-TasksManager.prototype.isValidTypeSel = function(typeSel) {
+TasksContext.prototype.isValidTypeSel = function(typeSel) {
   return (/^[a-z\.\*\d]+\s\[(\any|running|scheduled)\]+$/.test(typeSel));
 };
 
 
 //
-TasksManager.prototype.isValidType = function(type) {
+TasksContext.prototype.isValidType = function(type) {
   return (/^[a-z\.\d]+$/.test(type));
 };
 
 
-global.tasks = new TasksManager();
+global.tasks = new TasksContext();
 
 })(this);
