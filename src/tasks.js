@@ -61,6 +61,8 @@ function TasksContext(relScope, owner) {
 
   // But have their own schedulers
   this.schedulers = [];
+
+  this.selectorCache = {};
 }
 
 
@@ -297,7 +299,13 @@ TasksContext.prototype.parseTypeSel = function(typeSel) {
   var result = [], // 0: regex, 1: status
       parts,
       properties,
-      r;
+      parsed,
+      re;
+
+  // Cached
+  if (this.selectorCache[typeSel]) {
+    return this.selectorCache[typeSel];
+  }
 
   if (!this.isValidTypeSel(typeSel)) {
     throw new Error('invalid type selector');
@@ -305,7 +313,7 @@ TasksContext.prototype.parseTypeSel = function(typeSel) {
 
   // Split and create regex
   parts = typeSel.match(reTypeSel);
-  r = '^' +
+  re = '^' +
       parts[1].replace(/\./g, '\\.', 'g').
       replace('*', '.*?', 'g') +
       '$';
@@ -314,7 +322,9 @@ TasksContext.prototype.parseTypeSel = function(typeSel) {
   properties = this._resolveProperties(parts[2]); // 0 status, 1 owner
 
   // Result
-  return [new RegExp(r), properties[0], properties[1]];
+  parsed = [new RegExp(re), properties[0], properties[1]];
+  this.selectorCache[typeSel] = parsed;
+  return parsed;
 };
 
 
