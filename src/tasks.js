@@ -3,6 +3,11 @@
 (function(global) {
 
 
+var reType = /^[a-z_\.\d]+$/,
+    reTypeSel = /^([a-z\.\*\d]+)\s*?(\[[a-z\s,]+\])?$/,
+    reProps = /(\w+)/g;
+
+
 //
 function joinTypes(a, b) {
   if (!a) return b;
@@ -121,11 +126,10 @@ TasksContext.prototype.remember = function(task) {
 // Public find
 // Returns all tasks matching type selector
 TasksContext.prototype.find = function(scopedTypeSel) {
-  var p, l, r, t, all, typeSel;
+  var p, l, r, t, all, typeSel, mine;
 
-  typeSel = joinTypes(this.fullScope, typeSel);
-  p = this.parseTypeSel(typeSel)[0];
-  all = p[1] === "all";
+  typeSel = joinTypes(this.fullScope, scopedTypeSel);
+  p = this.parseTypeSel(typeSel);
   l = this.tasks.length;
   r = [];
 
@@ -135,13 +139,21 @@ TasksContext.prototype.find = function(scopedTypeSel) {
   // the same scope)
   while (l--) {
     t = this.tasks[l];
-    if (p[0].test(t.fullType) &&
-        (all || t.status === p[1]) &&
-        selfOrOwners(t.creator, this)) {
-      r.push(t);
+
+    // Check conditions
+    if (!p[0].test(t.fulltype)) continue;
+    if (p[1] !== "all" || p[1] !== t.status) continue;
+    if (p[2] !== "all") {
+      mine = selfOrOwners(t.creator, this);
+      if (p[2] === "mine" && !mine) continue;
+      if (p[2] === "others" && mine) continue;
     }
+
+    // We survived, so push
+    r.push(t);
   }
 
+  // Fix order
   return r.reverse();
 };
 
@@ -284,7 +296,7 @@ TasksContext.prototype.schedule = function(scopedTypeOrTask) {
 TasksContext.prototype.parseTypeSel = function(typeSel) {
   var result = [], // 0: regex, 1: status
       parts,
-      status,
+      properties,
       r;
 
   if (!this.isValidTypeSel(typeSel)) {
@@ -292,29 +304,74 @@ TasksContext.prototype.parseTypeSel = function(typeSel) {
   }
 
   // Split and create regex
-  parts = typeSel.split(' ');
+  parts = typeSel.match(reTypeSel);
   r = '^' +
-      parts[0].replace(/\./g, '\\.', 'g').
+      parts[1].replace(/\./g, '\\.', 'g').
       replace('*', '.*?', 'g') +
       '$';
 
-  // Get status
-  status = parts[1].match(/\[(.*)\]/)[1];
+  // Get properties
+  properties = this._resolveProperties(parts[2]); // 0 status, 1 owner
 
   // Result
-  return [new RegExp(r), status];
+  return [new RegExp(r), properties[0], properties[1]];
 };
 
 
 //
 TasksContext.prototype.isValidTypeSel = function(typeSel) {
-  return (/^[a-z\.\*\d]+\s\[(\any|running|scheduled)\]+$/.test(typeSel));
+  return reTypeSel.test(typeSel);
 };
 
 
 //
 TasksContext.prototype.isValidType = function(type) {
-  return (/^[a-z\.\d]+$/.test(type));
+  return reType.test(type);
+};
+
+
+// Returns [status, owner]
+TasksContext.prototype._resolveProperties = function(properties) {
+  var words,
+      status,
+      owner,
+      someAll,
+      l;
+
+  // Defaults
+  if (!properties) return ["all", "mine"];
+
+  words = properties.match(reProps);
+
+  // [all] or [all, all]
+  if (words.length === 1 && words[0] === "all" ||
+      words.length === 2 && words[0] === "all" && words[1] === "all") {
+    return ["all", "all"];
+  }
+
+  if (words.length > 2) {
+    throw new Error("onyl two selector properties support (you gave: " +
+        properties + ")");
+  }
+
+  // One or two props, distribute!
+  l = words.length;
+  while (l--) {
+    if (",running,scheduled,".indexOf("," + words[l] + ",") !== -1) {
+      status = words[l];
+    } else if (",mine,others,".indexOf("," + words[l] + ",") !== -1) {
+      owner = words[l];
+    } else if ("all" === words[l]) {
+      someAll = true;
+    } else {
+      throw new Error("unknown selector property " + words[l]);
+    }
+  }
+
+  if (!status && someAll) status = "all";
+  if (!owner && someAll) owner = "all";
+
+  return [status || "all", owner || "mine"];
 };
 
 
