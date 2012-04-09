@@ -37,7 +37,7 @@
 
 
     //
-    module("task creation and cancelling");
+    module("task creation");
 
     test("create a few tasks", function() {
       var l = 10;
@@ -73,6 +73,22 @@
 
       tasks.cancel("sample.task");
       equal(cancelled, 10, "cancelled");
+    });
+
+
+    test("create and destroy", function() {
+      var l = 10;
+      while (l--) {
+        tasks.create("sample.task").resolve();
+      }
+
+      l = 10;
+      while (l--) {
+        tasks.create("sample.task").reject();
+      }
+
+      samples = tasks.find("sample.task");
+      equal(samples.length, 0, "no tasks because all resolved or rejected");
     });
 
 
