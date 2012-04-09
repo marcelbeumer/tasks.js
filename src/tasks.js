@@ -30,9 +30,9 @@ function isPromiseAllowed(r) {
 
 //
 function selfOrOwners(obj, self) {
-  var o = self;
+  var o = obj;
   while (o) {
-    if (obj === o) return true;
+    if (self === o) return true;
     o = o.owner;
   }
 }
@@ -66,8 +66,15 @@ function TasksContext(relScope, owner) {
   this.captures = [];
   this.capturedTypes = {};
 
+  // Add capture scheduler
   this.addScheduler($.proxy(this._handleCaptureSchedule, this));
 }
+
+
+//
+TasksContext.prototype.reset = function() {
+  TasksContext.call(this, this.relScope, this.owner);
+};
 
 
 //
@@ -150,8 +157,8 @@ TasksContext.prototype.find = function(scopedTypeSel) {
     t = this.tasks[l];
 
     // Check conditions
-    if (!p[0].test(t.fulltype)) continue;
-    if (p[1] !== "all" || p[1] !== t.status) continue;
+    if (!p[0].test(t.fullType)) continue;
+    if (p[1] !== "all" && p[1] !== t.status) continue;
     if (p[2] !== "all") {
       mine = selfOrOwners(t.creator, this);
       if (p[2] === "mine" && !mine) continue;
@@ -267,7 +274,7 @@ TasksContext.prototype.schedule = function(scopedTypeOrTask) {
   }
 
   // Set task as being scheduled
-  task.status = "scheduling";
+  task.status = "scheduled";
 
   // See if we are allowed to
   allowed = this.allowed(task.scopedType);
@@ -303,15 +310,17 @@ TasksContext.prototype.schedule = function(scopedTypeOrTask) {
 
 //
 TasksContext.prototype.capture = function(scopedTypeSel) {
-  var cap;
+  var cap, fullTypeSel;
 
   if (!this.isValidTypeSel(scopedTypeSel)) {
     throw new Error('invalid type selector');
   }
 
+  fullTypeSel = joinTypes(this.fullScope, scopedTypeSel);
+
   cap = {
-    scopedTypeSel: scopedTypeSel,
-    parsed: this.parseTypeSel(scopedTypeSel)
+    fullTypeSel: fullTypeSel,
+    parsed: this.parseTypeSel(fullTypeSel)
   };
 
   this.captures.push(cap);
@@ -320,12 +329,18 @@ TasksContext.prototype.capture = function(scopedTypeSel) {
 
 //
 TasksContext.prototype.release = function(scopedTypeSel) {
-  var l = this.captures.length, c, name, ct;
+  var l = this.captures.length, c, name, ct, fullTypeSel;
+
+  if (!this.isValidTypeSel(scopedTypeSel)) {
+    throw new Error('invalid type selector');
+  }
+
+  fullTypeSel = joinTypes(this.fullScope, scopedTypeSel);
 
   // Remove capture(s)
   while (l--) {
     c = this.captures[l];
-    if (scopedTypeSel === "*" || c.scopedTypeSel === scopedTypeSel) {
+    if (fullTypeSel === "*" || c.fullTypeSel === fullTypeSel) {
       this.captures.splice(l, 1);
     }
   }
@@ -389,15 +404,22 @@ TasksContext.prototype.isValidType = function(type) {
 //
 TasksContext.prototype._handleCaptureSchedule = function(scopedType) {
   var l = this.captures.length,
+      fullType,
       c,
       d;
 
+  if (!this.isValidType(scopedType)) {
+    throw new Error("invalid type");
+  }
+
+  fullType = joinTypes(this.fullScope, scopedType);
+
   while (l--) {
     c = this.captures[l];
-    if (c.parsed[0].test(scopedType)) {
+    if (c.parsed[0].test(fullType)) {
 
-      d = this.capturedTypes[scopedType] || new $.Deferred();
-      this.capturedTypes[scopedType] = d;
+      d = this.capturedTypes[fullType] || new $.Deferred();
+      this.capturedTypes[fullType] = d;
 
       return d.promise();
     }
