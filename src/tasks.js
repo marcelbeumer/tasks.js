@@ -61,8 +61,12 @@ function TasksContext(relScope, owner) {
 
   // But have their own schedulers
   this.schedulers = [];
-
   this.selectorCache = {};
+
+  this.captures = [];
+  this.capturedTypes = {};
+
+  this.addScheduler($.proxy(this._handleCaptureSchedule, this));
 }
 
 
@@ -74,7 +78,7 @@ TasksContext.prototype.context = function(relScope) {
 
 //
 TasksContext.prototype.create = function(scopedType) {
-  var d, type;
+  var t, type, Constr;
 
   // Prefix scope
   type = joinTypes(this.fullScope, scopedType);
@@ -84,21 +88,24 @@ TasksContext.prototype.create = function(scopedType) {
   }
 
   // Create deferred
-  d = new $.Deferred();
-  d.creator = this;
-  d.fullType = type;
-  d.scopedType = scopedType;
-  d.status = "running";
+  Constr = function(){};
+  Constr.prototype = new $.Deferred();
+
+  t = new Constr();
+  t.creator = this;
+  t.fullType = type;
+  t.scopedType = scopedType;
+  t.status = "running";
 
   // Push it
-  this.tasks.push(d);
+  this.tasks.push(t);
 
   // Always clean up
-  d.always($.proxy(function() {
-    this.forget(d);
+  t.always($.proxy(function() {
+    this.forget(t);
   }, this));
 
-  return d;
+  return t;
 };
 
 
@@ -128,7 +135,7 @@ TasksContext.prototype.remember = function(task) {
 // Public find
 // Returns all tasks matching type selector
 TasksContext.prototype.find = function(scopedTypeSel) {
-  var p, l, r, t, all, typeSel, mine;
+  var p, l, r, t, typeSel, mine;
 
   typeSel = joinTypes(this.fullScope, scopedTypeSel);
   p = this.parseTypeSel(typeSel);
@@ -163,7 +170,7 @@ TasksContext.prototype.find = function(scopedTypeSel) {
 // Public cancel
 // Rejects all current tasks that match type selector
 TasksContext.prototype.cancel = function(scopedTypeSel) {
-  var tasks, l, x, typeSel;
+  var tasks, l, x;
 
   tasks = this.find(scopedTypeSel);
   for (x = 0; x < (l = tasks.length); x++) {
@@ -219,7 +226,7 @@ TasksContext.prototype.allowed = function(scopedType) {
 
     // Run scheduler
     s = this.schedulers[x];
-    r = s.apply(this, scopedType);
+    r = s(scopedType);
 
     // In case of negative result, return right away,
     if (isNegAllowed(r)) return r;
@@ -253,7 +260,7 @@ TasksContext.prototype.schedule = function(scopedTypeOrTask) {
   scheduling = new $.Deferred();
 
   // Get or create task
-  if (typeof(typeOrTask) === "string") {
+  if (typeof(scopedTypeOrTask) === "string") {
     task = this.create(scopedTypeOrTask);
   } else {
     task = scopedTypeOrTask;
@@ -290,14 +297,53 @@ TasksContext.prototype.schedule = function(scopedTypeOrTask) {
   }
 
   // Promise
-  return scheduling.promsise();
+  return scheduling.promise();
+};
+
+
+//
+TasksContext.prototype.capture = function(scopedTypeSel) {
+  var cap;
+
+  if (!this.isValidTypeSel(scopedTypeSel)) {
+    throw new Error('invalid type selector');
+  }
+
+  cap = {
+    scopedTypeSel: scopedTypeSel,
+    parsed: this.parseTypeSel(scopedTypeSel)
+  };
+
+  this.captures.push(cap);
+};
+
+
+//
+TasksContext.prototype.release = function(scopedTypeSel) {
+  var l = this.captures.length, c, name, ct;
+
+  // Remove capture(s)
+  while (l--) {
+    c = this.captures[l];
+    if (scopedTypeSel === "*" || c.scopedTypeSel === scopedTypeSel) {
+      this.captures.splice(l, 1);
+    }
+  }
+
+  // Update all capturedTypes
+  for (name in this.capturedTypes) {
+    ct = this.capturedTypes[name];
+    if (this._handleCaptureSchedule(name) === true) {
+      delete this.capturedTypes[name]; // Clear
+      ct.resolve(); // Release
+    }
+  }
 };
 
 
 //
 TasksContext.prototype.parseTypeSel = function(typeSel) {
-  var result = [], // 0: regex, 1: status
-      parts,
+  var parts,
       properties,
       parsed,
       re;
@@ -337,6 +383,27 @@ TasksContext.prototype.isValidTypeSel = function(typeSel) {
 //
 TasksContext.prototype.isValidType = function(type) {
   return reType.test(type);
+};
+
+
+//
+TasksContext.prototype._handleCaptureSchedule = function(scopedType) {
+  var l = this.captures.length,
+      c,
+      d;
+
+  while (l--) {
+    c = this.captures[l];
+    if (c.parsed[0].test(scopedType)) {
+
+      d = this.capturedTypes[scopedType] || new $.Deferred();
+      this.capturedTypes[scopedType] = d;
+
+      return d.promise();
+    }
+  }
+
+  return true;
 };
 
 
