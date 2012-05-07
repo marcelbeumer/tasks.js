@@ -252,6 +252,7 @@
 
       // Release now, otherwise they are not created yet
       tasks.release("*");
+
     });
   }
 

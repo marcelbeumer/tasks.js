@@ -3,8 +3,8 @@
 (function(global) {
 
 
-var reType = /^[a-z_\.\d]+$/,
-    reTypeSel = /^([a-z\.\*\d]+)\s*?(\[[a-z\s,]+\])?$/,
+var reType = /^[a-zA-Z_\.\d]+$/,
+    reTypeSel = /^([a-zA-Z\.\*\d]+)\s*?(\[[a-zA-Z\s,]+\])?$/,
     reProps = /(\w+)/g;
 
 
@@ -102,6 +102,7 @@ TasksContext.prototype.create = function(scopedType) {
   t.creator = this;
   t.fullType = type;
   t.scopedType = scopedType;
+  t.data = {};
   t.status = "running";
 
   // Push it
@@ -275,6 +276,7 @@ TasksContext.prototype.schedule = function(scopedTypeOrTask) {
 
   // Set task as being scheduled
   task.status = "scheduled";
+  delete task.waitingFor;
 
   // See if we are allowed to
   allowed = this.allowed(task.scopedType);
@@ -294,11 +296,21 @@ TasksContext.prototype.schedule = function(scopedTypeOrTask) {
   } else {
 
     // We must have a promise, so we wait for it
+    task.waitingFor = allowed;
+
     allowed.done(function() {
-      task.status = "running";
-      scheduling.resolve(task);
+      if (task.waitingFor) {
+        delete task.waitingFor;
+        task.status = "running";
+        scheduling.resolve(task);
+      } else {
+        scheduling.reject();
+      }
     }).fail(function(reason) {
-      task.reject(reason);
+      if (task.waitingFor) {
+        delete task.waitingFor;
+        task.reject(reason);
+      }
       scheduling.reject(reason);
     });
   }
